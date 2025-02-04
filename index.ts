@@ -1,12 +1,9 @@
-import { Player } from './types/player';
-import { Point, PointsData, Score } from './types/score';
+import { isSamePlayer, Player } from './types/player';
+import { game, points, PointsData, Score } from './types/score';
+import { advantage, deuce, fifteen, forty, FortyData, love, Point, thirty } from './types/score';
+
 import { none, Option, some, match as matchOpt } from 'fp-ts/Option';
 import { pipe } from 'fp-ts/lib/function';
-import * as fc from 'fast-check';
-import { game, deuce, forty } from './types/score';
-import {isSamePlayer } from './types/player';
-import * as G from './__tests__/generators';
-
 
 // -------- Tooling functions --------- //
 
@@ -26,115 +23,124 @@ export const otherPlayer = (player: Player) => {
       return 'PLAYER_ONE';
   }
 };
+
 // Exercice 1 :
 export const pointToString = (point: Point): string => {
-  switch (point) {
-    case 0:
-      return 'Love';
-    case 15:
-      return 'Fifteen';
-    case 30:
-      return 'Thirty';
-    case 40:
-      return 'Forty';
-    default:
-      throw new Error(`Invalid Point: ${point}`);
+  switch (point.kind) {
+    case 'LOVE': return '0';
+    case 'FIFTEEN': return '15';
+    case 'THIRTY': return '30';
   }
 };
+
+const formatPoints = (player: Player, pointsData: PointsData) =>
+  `${playerToString(player)}: ${pointToString(pointsData[player])}`;
 
 export const scoreToString = (score: Score): string => {
   switch (score.kind) {
-    case 'POINTS': {
-      const { PLAYER_ONE, PLAYER_TWO } = score.pointsData;
-      return `Player 1: ${pointToString(PLAYER_ONE)}, Player 2: ${pointToString(PLAYER_TWO)}`;
-    }
+    case 'POINTS':
+      return `${formatPoints('PLAYER_ONE', score.pointsData)} - ${formatPoints('PLAYER_TWO', score.pointsData)}`;
+    case 'FORTY':
+      return `${playerToString(score.fortyData.player)}: 40 - ${playerToString(otherPlayer(score.fortyData.player))}: ${pointToString(score.fortyData.otherPoint)}`;
     case 'DEUCE':
-      return 'Deuce';
-    case 'FORTY': {
-      const { player, opponentPoints } = score;
-      return `${playerToString(player)}: Forty, ${playerToString(
-        otherPlayer(player)
-      )}: ${pointToString(opponentPoints)}`;
-    }
+      return `Deuce`;
     case 'ADVANTAGE':
-      return `Advantage ${playerToString(score.player)}`;
+      return `Advantage: ${playerToString(score.player)}`;
     case 'GAME':
-      return `Game won by ${playerToString(score.player)}`;
-    default:
-      throw new Error('Invalid Score type');
+      return `Game: ${playerToString(score.player)}`;
   }
 };
 
-export const scoreWhenDeuce = (winner: Player): Score => {
-  throw new Error('not implemented');
-};
+
+export const scoreWhenDeuce = (winner: Player): Score => advantage(winner);
 
 export const scoreWhenAdvantage = (
   advantagedPlayed: Player,
   winner: Player
 ): Score => {
-  throw new Error('not implemented');
+  if (isSamePlayer(advantagedPlayed, winner)) return game(winner);
+  return deuce();
 };
 
 export const scoreWhenForty = (
-  currentForty: unknown, // TO UPDATE WHEN WE KNOW HOW TO REPRESENT FORTY
+  currentForty: FortyData, 
   winner: Player
 ): Score => {
-  throw new Error('not implemented');
+  if (isSamePlayer(currentForty.player, winner)) return game(winner);
+  return pipe(
+    incrementPoint(currentForty.otherPoint),
+    matchOpt(
+      () => deuce(),
+      p => forty(currentForty.player, p) as Score
+    )
+  );
 };
 
 export const scoreWhenGame = (winner: Player): Score => {
-  throw new Error('not implemented');
+  return game(winner);
 };
 
 // Exercice 2
 // Tip: You can use pipe function from fp-ts to improve readability.
 // See scoreWhenForty function above.
 export const scoreWhenPoint = (current: PointsData, winner: Player): Score => {
-  throw new Error('not implemented');
+  return pipe(
+    incrementPoint(current[winner]),
+    matchOpt(
+      () => forty(winner, current[otherPlayer(winner)]),
+      (newPoint) => ({
+        kind: 'POINTS',
+        pointsData: {
+          ...current,
+          [winner]: newPoint,
+        },
+      } as Score)
+    )
+  );
 };
 
 export const score = (currentScore: Score, winner: Player): Score => {
-  throw new Error('not implemented');
+  switch (currentScore.kind) {
+    case 'POINTS':
+      return scoreWhenPoint(currentScore.pointsData, winner);
+    case 'FORTY':
+      return scoreWhenForty(currentScore.fortyData, winner);
+    case 'ADVANTAGE':
+      return scoreWhenAdvantage(currentScore.player, winner);
+    case 'DEUCE':
+      return scoreWhenDeuce(winner);
+    case 'GAME':
+      return scoreWhenGame(winner);
+  }
 };
 
+export const incrementPoint = (point: Point): Option<Point> => {
+  switch (point.kind) {
+    case 'LOVE':
+      return some(fifteen());
+    case 'FIFTEEN':
+      return some(thirty());
+    case 'THIRTY':
+      return none;
+  }
+};
 
-test('Given a player at 40 when the same player wins, score is Game for this player', () => {
-  fc.assert(
-    fc.property(G.getForty(), G.getPlayer(), ({ fortyData }, winner) => {
-      // Player who has forty points wins
-      fc.pre(isSamePlayer(fortyData.player, winner));
-      const score = scoreWhenForty(fortyData, winner);
-      const scoreExpected = game(winner);
-      expect(score).toStrictEqual(scoreExpected);
-    })
-  );
-});
+const simulateGame = () => {
+  let currentScore: Score = points(love(), love());
+  console.log("🎾 Début du jeu 🎾");
 
-test('Given player at 40 and other at 30 when other wins, score is Deuce', () => {
-  fc.assert(
-    fc.property(G.getForty(), G.getPlayer(), ({ fortyData }, winner) => {
-      // Other player wins
-      fc.pre(!isSamePlayer(fortyData.player, winner));
-      // Other player's points must be 30
-      fc.pre(fortyData.opponentPoints === 30);
-      const score = scoreWhenForty(fortyData, winner);
-      const scoreExpected = deuce();
-      expect(score).toStrictEqual(scoreExpected);
-    })
-  );
-});
+  const players: Player[] = ['PLAYER_ONE', 'PLAYER_TWO'];
+  let round = 1;
 
-test('Given player at 40 and other at 15 when other wins, score is 40 - 30', () => {
-  fc.assert(
-    fc.property(G.getForty(), G.getPlayer(), ({ fortyData }, winner) => {
-      // Other player wins
-      fc.pre(!isSamePlayer(fortyData.player, winner));
-      // Other player's points must be 15
-      fc.pre(fortyData.opponentPoints === 15);
-      const score = scoreWhenForty(fortyData, winner);
-      const scoreExpected = forty(fortyData.player, 30);
-      expect(score).toStrictEqual(scoreExpected);
-    })
-  );
-});
+  while (currentScore.kind !== 'GAME') {
+    const winner = players[Math.floor(Math.random() * players.length)];
+    currentScore = score(currentScore, winner);
+    console.log(`🏆 Point ${round}: ${playerToString(winner)} gagne!`);
+    console.log(`🔹 Score actuel: ${scoreToString(currentScore)}\n`);
+    round++;
+  }
+
+  console.log(`🎉 Match terminé! ${playerToString(currentScore.player)} a gagné!`);
+};
+
+simulateGame();
